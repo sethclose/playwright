@@ -1,70 +1,44 @@
+import pandas as pd
+import log.logging as logging
 from playwright.sync_api import sync_playwright
-from playwright.async_api import async_playwright
-import asyncio
-import time
-import comps
+import steps
 
-sync_mode = True
-async_mode = False
-headless_mode = False
-trace_mode = True
+# Config
+config_df = pd.read_csv("data/config.csv", index_col=0)
+config_df.head()
+headless = True if config_df.loc["headless"].value == "TRUE" else False
+trace_mode = True if config_df.loc["trace_mode"].value == "TRUE" else False
+trace_file = config_df.loc["trace_file"].value
+screenshots = True if config_df.loc["screenshots"].value == "TRUE" else False
 
-def sync_main():
-    with sync_playwright() as p:
-        print('Starting Run')
-        browser = p.chromium.launch(headless=headless_mode)
+# Logging
+log_file_name = 'log/log.txt'
+with open(log_file_name, 'w', encoding='utf-8') as file:
+    log_file = logging.Log(file, log_file_name, trace_mode, screenshots)
+    log_file.start_file()
+    log_file.s('playwright')
 
-        print("  Running")
-        page, context = comps.start_page(browser, trace_mode=trace_mode)
-        comps.goto_brm(page)
-        page.screenshot(path="./log/screenshots/login.png")
+    with sync_playwright() as play:
+        log_file.s('main')
 
-        # Test Cases
-        if  comps.is_login(page):
-            comps.log_in(page, 10)
+        log_file.w("Launching browser")
+        browser = play.chromium.launch(headless=headless)
 
-            #comps.start_quote(page)
+        page, context = steps.start_page(l=log_file, browser=browser)
+        steps.go_to_page(log_file, page, 0)
 
-            #comps.start_quote_new_party(page)
-            #comps.new_quote_party(page)
+        if steps.is_login(log_file, page, 0):
 
-            comps.open_existing_quote(page)
+            steps.log_in(log_file, page, 0)
 
-            #comps.start_quote_old_party(page)
-            #comps.finish_named_insured(page)
+            steps.start_quote(log_file, page)
+            steps.customer_search(log_file, page)
 
-            #comps.underwriting_questions(page)
+            #steps.log_out(log_file, page, 0)
 
-            #comps.dwelling_information(page)
-            #comps.dwelling_information_360(page)
+        log_file.e() # sync
+        steps.inspect_page(log_file, page)
+        steps.stop_page(log_file, browser, context, trace_mode, trace_file)
 
-            #comps.rate_summary(page)
-            #comps.payment_details(page)
+    log_file.e() # playwright
 
-            #comps.log_out(page)
-
-        print("  Finished")
-
-        page.pause()
-        comps.stop_page(browser, context, trace_mode)
-        print('Finished Run')
-
-if sync_mode:
-    sync_main()
-
-
-
-async def async_main():
-    print("Starting Async Run")
-    async with async_playwright() as p_async:
-        browser_async = await p_async.chromium.launch(headless=headless_mode)
-        page_async = await browser_async.new_page()
-        await page_async.goto("https://uwd125.duckcreekondemand.com/Policy/express.aspx")
-        time.sleep(10)
-        print(f"  {await page_async.title()}")
-        await page_async.screenshot(path="./screenshot_brm.png")
-        await page_async.pause()
-        await browser_async.close()
-    print("Finished Async Run")
-if async_mode:
-    asyncio.run(async_main())
