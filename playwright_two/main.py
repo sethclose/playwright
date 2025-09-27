@@ -1,7 +1,9 @@
-import pandas as pd
-import log.logging as logging
 from playwright.sync_api import sync_playwright
+import pandas as pd
 import steps
+import log
+import data
+import tools
 
 # Config
 config_df = pd.read_csv("data/config.csv", index_col=0)
@@ -11,34 +13,51 @@ trace_mode = True if config_df.loc["trace_mode"].value == "TRUE" else False
 trace_file = config_df.loc["trace_file"].value
 screenshots = True if config_df.loc["screenshots"].value == "TRUE" else False
 
-# Logging
-log_file_name = 'log/log.txt'
-with open(log_file_name, 'w', encoding='utf-8') as file:
-    log_file = logging.Log(file, log_file_name, trace_mode, screenshots)
-    log_file.start_file()
-    log_file.s('playwright')
+input_path = 'data/testing/tests'
+output_path = 'data/testing/output'
+tools.make_folder(output_path)
 
-    with sync_playwright() as play:
-        log_file.s('main')
+# Retrieve Test Data and Run Tests
+tests = data.get_test_data(input_path)
+for test, df_dict in tests.items():
 
-        log_file.w("Launching browser")
-        browser = play.chromium.launch(headless=headless)
+    # Set up logging
+    test_name = test[:test.find('.')]
+    input_file_path = input_path + '/' + test_name
+    log_file_name = test_name + '_' + tools.get_date_stamp() + '_log.txt'
 
-        page, context = steps.start_page(l=log_file, browser=browser)
-        steps.go_to_page(log_file, page, 0)
+    # Output locations
+    tools.make_folder(output_path + '/' + test_name)
+    tools.make_folder(output_path + '/' + test_name + '/' + tools.get_date_stamp())
+    created_folders = True
+    test_output_path = output_path + '/' + test_name + '/' + tools.get_date_stamp()
+    output_file_path = test_output_path + '/' + log_file_name
 
-        if steps.is_login(log_file, page, 0):
+    print(f"Running test: '{test_name}'  '{input_file_path}'  =>  '{output_file_path}'")
 
-            steps.log_in(log_file, page, 0)
+    # Start Logging
+    with open(output_file_path, 'w', encoding='utf-8') as file:
+        log_file = log.Log(file, test_name=test_name, output_path=test_output_path, trace_mode=trace_mode, screenshots=screenshots)
+        log_file.start_file()
+        log_file.s(f"Test {test_name}")
 
-            steps.start_quote(log_file, page)
-            steps.customer_search(log_file, page)
+        # Start Playwright
+        with sync_playwright() as play:
+            log_file.s('Play')
+            log_file.w("Launching browser")
+            browser = play.chromium.launch(headless=headless)
+            page, context = steps.start_page(l=log_file, browser=browser)
+            steps.go_to_page(log_file, page, 0)
 
-            #steps.log_out(log_file, page, 0)
+            # Execute Tests
+            for step, step_df in df_dict.items():
+                log_file.s(f"Step: {step}")
+                steps.do_step(l=log_file, page=page, step=step, step_actions=step_df.to_dict(orient='records'))
+                log_file.e()  # Step
 
-        log_file.e() # sync
-        steps.inspect_page(log_file, page)
-        steps.stop_page(log_file, browser, context, trace_mode, trace_file)
+            steps.inspect_page(log_file, page)
+            steps.stop_page(log_file, browser, context, trace_mode, trace_file)
 
-    log_file.e() # playwright
+            log_file.e()  # Play
 
+        log_file.e() # Test

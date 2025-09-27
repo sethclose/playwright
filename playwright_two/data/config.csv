@@ -1,0 +1,5 @@
+name,value
+headless,FALSE
+trace_mode,TRUE
+screenshots,TRUE
+trace_file,trace.zip

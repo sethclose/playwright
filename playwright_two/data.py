@@ -1,71 +1,43 @@
 import pandas as pd
 import os
-import openpyxl
+import tools
 
-# From an XLSX File
-print("")
-def xlsx_rows(file_name:str, sheet: str, screen:str='*', section:str='*'):
-    file_loc = f"data/{file_name}.xlsx"
-    df_file = pd.read_excel(file_loc, sheet_name=sheet)
-    #print(df_file)
-    screen_condition = df_file["screen"] == screen if screen != '*' else df_file["screen"] != "NO"
-    section_condition = df_file["section"] == section if section != '*' else df_file["section"] != "NO"
-    df_rows = df_file.loc[screen_condition & section_condition]
-    df_dict = df_rows.to_dict(orient='records')
-    return df_dict
-file_name = 'seth_test'
-sheet = 'new_quote'
-screen = 'Quote'
-section = 'Term'
-print(f"  {file_name=}, {sheet=}, {screen=}, {section=}")
-for item in xlsx_rows(file_name, 'new_quote', 'Quote', 'Term'):
-    print(f"  {item['screen']}, {item['section']}, {item['type']}, {item['sleep']}, {item['iteration']}, {item['field']}, {item['value']}")
+# Get Test Data
+test_dir = 'data/testing/tests'
+def get_test_data(dir_path: str = test_dir) -> dict:
+    #dir_path = 'data/testing/tests'  # Replace with your actual directory
+    #print(f"dir_path: {dir_path}")
+    xls_files = os.listdir(dir_path)
+    xls_dfs_dict = {}
+    for file in xls_files:
+        if file.find(".xls") >= 0 and file.find("~$") == -1:
+            file_path = f"{dir_path}/{file}"
+            #print(f"{file_path=}")
+            df_dict = pd.read_excel(file_path, sheet_name=None)
+            for key, df in df_dict.items():
+                #print(f"\nkey: {key}\n df: {type(df)}")
+                df.dropna(subset=['type', 'iteration', 'field'], inplace=True)
+                #print(df)
+            xls_dfs_dict[file] = df_dict
+    return xls_dfs_dict
 
-# Find all XLSX Files
-def find_all_files(directory):
-    file_paths = []
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file[file.find(".")+1:] == 'xlsx' and file.find("~$") == -1: # Ignore non-xlsx, temp files
-                file_paths.append(os.path.join(root, file))
-
-    return file_paths
-search_dir = "data"  # Replace with your desired directory path
-paths = find_all_files(search_dir)
-for file_path in paths:
-    print(file_path)
-
-# Find all Sheets in XLSX Files
-for file_path in paths:
-    try:
-        file_path = str(file_path.replace("\\", "/"))
-        print(f"Sheets in '{file_path}':")
-        workbook = openpyxl.load_workbook(filename=file_path)
-        sheet_names = workbook.sheetnames
-        for sheet_name in sheet_names:
-            for item in xlsx_rows(file_path, sheet_name, '*', '*'):
-                print(
-                    f"  {item['screen']}, {item['section']}, {item['type']}, {item['sleep']}, {item['iteration']}, {item['field']}, {item['value']}")
-    except FileNotFoundError:
-        print(f"Error: The file '{file_path}' was not found.")
-    except Exception as e:
-        print(f"An error occurred: {e}")
-
-
-
-# From a CSV File
-#print("")
-def csv_rows(file_name:str, screen:str, section:str):
-    file_loc = f"data/{file_name}.csv"
-    df_file = pd.read_csv(file_loc)
-    df_rows = df_file.loc[(df_file["screen"] == screen) & (df_file["section"] == section)]
-    df_dict = df_rows.to_dict(orient='records')
-    return df_dict
-file_name = 'start_quote'
-screen = 'Quote'
-section = 'Term'
-#print(f"  {file_name=}, {screen=}, {section=}")
-for item in csv_rows('start_quote', 'Quote', 'Term'):
-    #print(f"  {item['screen']}, {item['section']}, {item['type']}, {item['sleep']}, {item['iteration']}, {item['field']}, {item['value']}")
-    pass
-#print("")
+# Create test_result_df
+output_path = 'data/testing/output'
+tools.make_folder(output_path)
+date_stamp = tools.get_date_stamp()
+test_df_dict = get_test_data()
+#print(test_df_dict)
+for test_file_name, df_dict in test_df_dict.items():
+    test_name = test_file_name[:test_file_name.find('.')]
+    print(test_name)
+    print(df_dict)
+    path = f'{output_path}/{test_name}/{date_stamp}'
+    tools.make_folder(f"{output_path}/{test_name}")
+    tools.make_folder(f"{output_path}/{test_name}/{tools.get_date_stamp()}")
+    file_name = f'{test_name}_{date_stamp}_result.xlsx'
+    # Make Test DF and Save
+    with pd.ExcelWriter(f'{path}/{file_name}', engine='openpyxl') as writer:
+        for step_name, df in df_dict.items():
+            print(step_name)
+            print(df)
+            df.to_excel(writer, sheet_name=step_name, index=False)
