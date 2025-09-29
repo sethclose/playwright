@@ -1,4 +1,5 @@
 from playwright.sync_api import Page
+import pandas as pd
 import os
 import time
 import log
@@ -9,7 +10,7 @@ DEV21_URL = os.environ.get('DEV21_URL')
 AGENT_USER = os.environ.get('AGENT_USER')
 AGENT_PASS = os.environ.get('AGENT_PASS')
 
-def start_page(l: log.Log, browser):
+def start(l: log.Log, browser):
     """
     Starts Playwright session
     :param l: Log file object
@@ -26,22 +27,33 @@ def start_page(l: log.Log, browser):
     l.e()
     return page, context
 
-def go_to_page(l: log.Log, page: Page, sleep: int=0):
-    l.s("go_to_page")
+def go(l: log.Log, page: Page, sleep: int=0):
+    l.s("Go to page")
     page.goto(DEV21_URL)
     time.sleep(sleep)
     l.e()
 
-def do_step(l: log.Log, page: Page, step: str, step_actions: list):
-    l.s("Do Step")
-    for item in step_actions:
-        #l.w(f"[*] {item['screen']} * {item['section']} * {item['type']} * {item['field']} * {item['value']}  * {item['iteration']} * {item['sleep']} [*]")
-        actions.do_loc(l, page, locator_type=item['type'], locator_name=item['field'], iteration=item['iteration'], value=item['value'], sleep=item['sleep'])
+def step(l: log.Log, page: Page, step_name: str, step_df: pd.DataFrame) -> pd.DataFrame:
+    l.s("Step")
+    # Initialize Result Columns
+    step_df['time'] = ''
+    step_df['result'] = ''
+    # For each action get result Series back and update step DF
+    for index, action in step_df.iterrows():
+        if action['override'] == 'skip':
+            pass
+        else:
+            print(f"   {action['field']} ({action['type'][0]})", end="  ")
+            returned = actions.act(l, page, action)
+            step_df.loc[index] = returned
+    # Show all action column indices and values
+    for index, action in step_df.iterrows():
+        l.w(f"#{index}: {[(i, a) for i, a in action.items()]}")
+    tools.take_screenshot(l, page, step_name)
     l.e()
-    tools.take_ss(l, page, step)
-    pass
+    return step_df
 
-def inspect_page(l: log.Log, page: Page):
+def inspect(l: log.Log, page: Page):
     """Opens Playwright Inspector, rather than closing browser."""
     l.s("inspect_page")
     #tools.page_wait(l, page)
@@ -49,7 +61,7 @@ def inspect_page(l: log.Log, page: Page):
     l.w("Playwright Inspector is ready.")
     l.e()
 
-def stop_page(l: log.Log, browser, context, trace_mode: bool, trace_file: str):
+def stop(l: log.Log, browser, context, trace_mode: bool, trace_file: str):
     l.s("stop_page")
     output_file = f"./{l.output_path}/{l.test_name}_{tools.get_date_stamp()}_{trace_file}"
     l.w(f"{trace_mode=}")

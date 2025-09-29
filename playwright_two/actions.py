@@ -1,9 +1,61 @@
 from playwright.sync_api import Page, Locator
-import time
 from datetime import datetime as dt
+import pandas as pd
+import time
 import log
 
-def get_loc(l: log.Log, page: Page, locator_type: str, locator_name: str, iteration: int=1):
+def wait_for_page(l: log.Log, page: Page):
+    l.s("Wait")
+
+    def load():
+        # Make sure Page is Not Loading
+        before = time.perf_counter()
+        load_count = 0
+        while page.title().find("Loading") != -1:
+            load_count += 1
+            if load_count == 0:
+                l.w(f"Waiting for while page is '{page.title()}'.")
+        l.w(f"Waited {time.perf_counter() - before:.1f} seconds page to load.")
+
+    def elements():
+        # Make Sure all Elements are Loaded
+        loaded = False
+        wait_seconds = (1/9)
+        locators = []
+        num = 0
+        before = time.perf_counter()
+        while not loaded:
+            #l.w(f"Waiting for all elements to load.  Current total is {num}.")
+            locators += page.get_by_role('textbox').all()
+            locators += page.get_by_role('button').all()
+            locators += page.get_by_role('radio').all()
+            locators = list(set(locators))
+            if len(locators) >= num != 0:
+                loaded = True
+            num = len(locators)
+            time.sleep(wait_seconds)
+        l.w(f"Waited {time.perf_counter() - before:.1f} for {num} element(s) to load.")
+
+    def spinner():
+        # Make Sure Spinner is Gone
+        before = time.perf_counter()
+        page.locator("#loading-spinner").wait_for(state="hidden")
+        l.w(f"Waited {time.perf_counter()-before:.1f} seconds for spinner to stop.")
+
+    def idle():
+        # Wait for Network Idle
+        before = time.perf_counter()
+        page.wait_for_load_state("networkidle")
+        l.w(f"Waited {time.perf_counter()-before:.1f} seconds for network idle.")
+
+    load()
+    elements()
+    spinner()
+    idle()
+
+    l.e()
+
+def get(l: log.Log, page: Page, locator_type: str, locator_name: str, iteration: int=1):
     """
     Finds the locator of the element specified
     :param l: passed log file object
@@ -13,105 +65,183 @@ def get_loc(l: log.Log, page: Page, locator_type: str, locator_name: str, iterat
     :param iteration: number of element if multiples
     :return: playwright locator object that was found
     """
-    l.s("Get Element")
-    locators = page.get_by_text(locator_name).all()
-    l.w(f"Found {len(locators)} locators for {locator_name} by Text.")
+
+    l.s(f"Get Element:  {locator_type}:{locator_name} ({iteration})")
+    found_by = ""
+    if locator_type == 'radio':
+        l.w(f"Getting Radio button choice(s)")
+        locators = page.locator(f'input[type="{locator_type}"]').all()
+        for loc in locators:
+            if locator_name.lower() in loc.get_attribute('fieldref').lower():
+                l.w(f"  Locator:  {evaluate_locator(loc)} contains '{locator_name}'")
+        locators = [loc for loc in locators if locator_name.lower() in loc.get_attribute('fieldref').lower()]
+    else:
+        locators = page.get_by_text(locator_name).all()
+        found_by = "Text"
+        l.w(f"'{locator_type}'(s) by {found_by}: {len(locators)}")
+
+    l.w(f"Found {len(locators)} locators for {locator_name} by {found_by}.")
+    for loc in locators:
+        l.w(f"  Locator:  {evaluate_locator(loc)}")
+
     for index, loc in enumerate(locators):
-        #l.w(f"  Found locator #{index}: {evaluate_locator(loc)}")
-        #l.w(f"  Looking for iteration: {iteration} (type={type(iteration)}) = {index + 1} (type={type(index)})?")
+        l.w(f"    Found locator #{index}: {evaluate_locator(loc)}")
+        l.w(f"    Looking for iteration: {iteration} (type={type(iteration)}) = {index + 1} (type={type(index)})?")
         if index + 1 == iteration:
-            l.w(f"  Selected Locator '{locator_type}' '{locator_name}' #{iteration}.")
+            l.w(f"      Selected Locator '{locator_type}' '{locator_name}' #{iteration}.")
             l.e()
             return loc
     l.e()
     return None
 
-def do_loc(l: log.Log, page: Page, locator_type: str, locator_name: str, iteration: int=1,
-           value: str="", sleep: float=0):
-    """
-    Executes the action on the locator element specified by `locator_name`.
-    :param l: passed log file object
-    :param page: playwright page object
-    :param locator_type: type of element being done
-    :param locator_name: name of element being done
-    :param iteration: number of element if multiples
-    :param value: value of element to be entered
-    :param sleep: seconds to wait after doing
-    :return: locator: playwright locator object
-    """
-    l.s("Do Action")
-    l.w(f"[*] {locator_type} * {locator_name} * #{iteration} * {value} * z{sleep} [*]")
-    not_ready = True
-    not_found = True
-    wait_start = dt.now()
-    max_wait = 10
-    while not_ready and not_found:
-        l.on = False # Don't log these attempts.
-        loc = get_loc(l=l, page=page, locator_type=locator_type, locator_name=locator_name, iteration=iteration)
-        l.on = True
-        seconds = (dt.now() - wait_start).seconds + (dt.now() - wait_start).microseconds / 1000000
-        if loc is not None:
-            not_ready = False
-            l.w(f"Found element in {seconds:.3f} seconds.")
-        elif seconds > max_wait:
-            not_found = False
-            l.w(f"Timed Out looking for element in {seconds:.1f} seconds.")
-    loc = get_loc(l=l, page=page, locator_type=locator_type, locator_name=locator_name, iteration=iteration)
-    if loc is None:
-        l.w(f"Locator Not Found")
+def act(l:log.Log, page: Page, action: pd.Series) -> pd.Series:
+    l.s("Action")
+    l.w(f"[*]{[f"{i}={a}" for i, a in action.items()]}[*]")
+
+    def override() -> bool:
+        return True if pd.notna(action['override']) else False
+
+    def wait() -> bool:
+        return True if action['wait'] == 1.0 else False
+
+    # Wait if specified (wait column)
+    if wait():
+        wait_for_page(l, page)
+
+    # Skip if specified (override column)
+    if action['override'] == 'skip':
+        l.w(f"Override:  Skip")
     else:
-        if locator_type == 'button':
-            l.w(f"Click: '{evaluate_locator(loc)}'")
-            loc.click()
-        elif locator_type == 'radio':
-            l.w(f"Check: '{evaluate_locator(loc)}'")
-            loc.check()
-        elif locator_type == 'checkbox':
-            l.w(f"Check: '{evaluate_locator(loc)}'")
-            loc.check()
-        elif locator_type == 'textbox':
 
-            # Only enter if value is to change.  May need several attempts.
-            current_value = loc.input_value()
-            test_value = str(value)
-            if current_value != test_value:
-                attempts = 0
-                while current_value != test_value:
-                    attempts += 1
-                    l.w(f"{locator_name}:  '{current_value}' != '{test_value}'")
-                    if current_value != '':
-                        l.w(f"Clear: '{current_value}'")
-                        loc.clear()
+        # Execute Action
 
-                    # DCT textboxes as dropdowns are finicky
-                    l.on = False
-                    loc_select = get_loc(l=l, page=page, locator_type='select', locator_name=test_value)
-                    l.on = True
-                    if loc_select is not None:
-                        l.w(f"Press: '{test_value}'")
-                        loc.press_sequentially(test_value)  # types in one key at a time
-                        time.sleep(1/2)
-                    else:
-                        l.w(f"Type: '{test_value}'")
-                        loc.type(test_value) # 'type' as in type on a keyboard
+        #action['result'] = ""
+        iteration = 1 if type(action['iteration']) not in [str, int] else action['iteration']
+        sleep_time = 0 if type(action['sleep']) not in [str, int] else action['sleep']
 
-                    # Tab out
-                    #l.w(f"Press:  Tab")
-                    #page.keyboard.press("Tab")
-
-                    # If there was trouble entering this value, sleep a second...
-                    current_value = loc.input_value()
-                    l.w(f"Current value: '{current_value}'")
-                    if attempts > 1:
-                        l.w(f"Repeated attempt (#{attempts-1}):  Pausing...")
-                        time.sleep(1/2)
-
-                l.w(f"Succeeded entry in only {attempts} attempt(s).")
+        not_ready = True
+        not_found = True
+        time_start = dt.now()   # Start timing
+        max_wait = 10           # Max seconds to try
+        while not_ready and not_found:
+            l.on = False # Don't log these attempts.
+            loc = get(l=l, page=page, locator_type=str(action['type']), locator_name=str(action['field']), iteration=int(iteration))
+            l.on = True
+            seconds = (dt.now()-time_start).seconds + (dt.now()-time_start).microseconds / 1_000_0000
+            if loc is not None:
+                not_ready = False
+                l.w(f"Found element in {seconds:.3f} seconds.")
+            elif seconds > max_wait:
+                not_found = False
+                l.w(f"Timed Out ({max_wait}) looking for element in {seconds:.1f} seconds.")
+        loc = get(l=l, page=page, locator_type=str(action['type']), locator_name=str(action['field']), iteration=int(iteration))
+        if loc is None:
+            l.w(f"Locator Not Found")
+        else:
+            l.w(f"Override:  {override()}")
+            if override():
+                l.w("Overriding action")
+                if action['override'] == 'hover':
+                    l.w(f"Overriding with {action['override']}")
+                    print(f"trying to hover on {action['field']}, what's the page title? {page.title()}")
+                    loc.hover()
+                elif action['override'] == 'check':
+                    l.w(f"Overriding with {action['override']}")
+                    action['result'] = loc.input_value()
             else:
-                l.w(f"'{current_value}' already set to '{test_value}'")
-        time.sleep(sleep)
+                l.w("Executing action")
+
+                if action['type'] == 'button' or action['type'] == 'a':
+                    if action['field'] == "Edit":
+                        l.w(f"  Here we are at 'Edit'")
+                        l.w(f"  Page: {page.title()}")
+                        #l.w(f"  Press: 'Enter'")
+                        #page.keyboard.press("Enter")
+                        #l.w(f"  Try: Check()")
+                        #loc.check()
+                        #l.w(f"Force Click: '{evaluate_locator(loc)}'")
+                        #loc.click(force=True)
+                        #l.w(f"Click: #action_63")
+                        #page.locator("#action_63").click()
+                        #for state in ["attached", "visible"]:
+                        #    l.w(f"Wait for '{state}'")
+                        #    loc.wait_for(state=state)
+                        #    l.w(f"  wait is over.")
+                        page.mouse.wheel(delta_x=-200, delta_y=0)
+                        #page.pause()
+                    else:
+                        l.w(f"Click Button: '{evaluate_locator(loc)}'")
+                        loc.click()
+
+                elif action['type'] == 'a':
+                    l.w(f"Click Link: '{evaluate_locator(loc)}'")
+                    loc.click()
+
+                elif action['type'] == 'radio':
+                    l.w(f"Click Radio: {evaluate_locator(loc)}'")
+                    loc.click()
+                    l.w(f"Press: 'Tab'")
+                    page.keyboard.press("Tab")
+                    l.w(f"Iteration: '{iteration}'")
+                    choice_count = 1
+                    while choice_count < iteration:
+                        choice_count += 1
+                        l.w(f"Press: 'ArrowUp'")
+                        page.keyboard.press("ArrowUp")
+                    l.w(f"Press: 'Space'")
+                    page.keyboard.press("Space")
+
+                elif action['type'] == 'checkbox':
+                    l.w(f"Check: '{evaluate_locator(loc)}'")
+                    loc.check()
+
+                elif action['type'] == 'textbox':
+                    l.w(f"Enter: '{evaluate_locator(loc)}'")
+
+                    # Only enter if value is to change.  May need several attempts.
+                    current_value = loc.input_value()
+                    test_value = str(action['value'])
+                    if current_value != test_value:
+                        attempts = 0
+                        while current_value != test_value:
+                            attempts += 1
+                            l.w(f"{action['field']}:  '{current_value}' != '{test_value}'")
+                            if current_value != '':
+                                l.w(f"Clear: '{current_value}'")
+                                loc.clear()
+
+                            # DCT textboxes as dropdowns are finicky
+                            l.on = False
+                            loc_select = get(l=l, page=page, locator_type='select', locator_name=test_value)
+                            l.on = True
+                            if loc_select is not None:
+                                l.w(f"Press keys: '{test_value}'")
+                                loc.press_sequentially(test_value)  # types in one key at a time
+                                time.sleep(1/2)
+                            else:
+                                l.w(f"Type: '{test_value}'")
+                                loc.type(test_value) # 'type' as in type on a keyboard
+
+                            # If there was trouble entering this value, nap
+                            current_value = loc.input_value()
+                            l.w(f"Current value: '{current_value}'")
+                            if attempts > 1:
+                                l.w(f"Repeated attempt (#{attempts-1}):  Pausing...")
+                                time.sleep(1/2)
+
+                        l.w(f"Succeeded entry in only {attempts} attempt(s).")
+                    else:
+                        l.w(f"'{current_value}' already set to '{test_value}'")
+                    action['result'] = current_value
+            l.w(f"Sleeping for {sleep_time} seconds...")
+            time.sleep(sleep_time)
+        action['time'] = l.section_seconds()
+        if action['result'] != '':
+            l.w(f"Result:  {action['result']}")
+        else:
+            l.w(f"No result returned")
     l.e()
-    return loc
+    return action
 
 def evaluate_locator(loc: Locator) -> str:
     """
@@ -138,15 +268,10 @@ def get_locator_nth_value(loc: Locator) -> str:
     nth_value = nth_value.replace("'", "")
     return nth_value
 
+
+
+
 def get_locators_all(page: Page, locator_types: list, search_types: list, locator_name: str) -> list:
-    """
-    Finds any and all locators on the page (debugging tool)
-    :param page: playwright page object
-    :param locator_types: types of locators being sought
-    :param search_types: types of search to perform
-    :param locator_name: descriptor of sought locator
-    :return:
-    """
     locators = []
     for locator_type in locator_types:
         print(f'      LOOKING for {locator_type}')
@@ -196,3 +321,71 @@ def get_locators_all(page: Page, locator_types: list, search_types: list, locato
                                                      #loc_key.all_inner_texts()[0] is None, loc_key.all_inner_texts()[0],
                                                      get_locator_nth_value(loc_key) is None, get_locator_nth_value(loc_key)))
     return locators
+
+def get_locator_object(page: Page, locator_type: str, locator_name: str, iteration: int=1) -> Locator:
+    print(f"      START get_locator_object '{locator_type}' '{locator_name}' #{iteration}")
+
+    # Look for locator directly by label
+    locators = page.get_by_label(locator_name).all()
+    print(f"        Found {len(locators)} locators for {locator_name} by label.")
+    for index, loc in enumerate(locators):
+        print(f"            Found locator: '{evaluate_locator(loc)}")
+        if index+1 == iteration:
+            print(f"            Setting Locator to '{locator_type}' '{locator_name}' directly by Label.")
+            print(f"      END get_locator_object '{locator_type}' '{locator_name}' #{iteration}")
+            #return loc
+
+    # Look for locator directly by text
+    locators = page.get_by_text(locator_name).all()
+    print(f"        Found {len(locators)} locators for {locator_name} by text.")
+    for index, loc in enumerate(locators):
+        print(f"            Found locator: '{evaluate_locator(loc)}")
+        if index+1 == iteration:
+            print(f"          Setting Locator to '{locator_type}' '{locator_name}' directly by Text.")
+            print(f"      END get_locator_object '{locator_type}' '{locator_name}' #{iteration}")
+            #return loc
+
+    search_types = []
+    if locator_type == 'textbox':
+        search_types = ['role']
+    elif locator_type == "button":
+        search_types = ['loc']
+    elif locator_type == "a":
+        search_types = ['text', 'loc', 'input']
+    elif locator_type == "radio":
+        search_types = ['input', 'text', 'role', 'loc']
+    elif locator_type == "checkbox":
+        search_types = ['role', 'loc']
+    else:
+        print(f"        Unhandled locator_type: {locator_type}.")
+    locators = get_locators_all(page, [locator_type], search_types, locator_name)
+    for loco in locators:
+        print(f"LOCATOR:   {evaluate_locator(loco)}")
+
+    found_locator = None
+    n = 0
+    print(f"        Looking for:  {locator_name=} {locator_type=} {iteration=}")
+    for loc in locators:
+        if False:
+            print(f"          PRE:  {evaluate_locator(loc)}")
+            print(f"            ==> {loc}")
+            print(f"                TEXTS {get_locator_text(loc)}")
+            print(f"             CONTENTS {get_locator_content(loc)}")
+            print(f"                   ID {loc.get_attribute("id")}")
+            print(f"                FIELD {loc.get_attribute('fieldref')}")
+            print(f"                CLASS {loc.get_attribute('class')}")
+            print(f"                TITLE {loc.get_attribute('title')}")
+        if locator_name in [loc.get_attribute("id"),
+                            loc.get_attribute('fieldref'),
+                            loc.all_inner_texts()[0],
+                            loc.all_text_contents()[0]]:
+            n += 1
+            print(f"        Match:  {evaluate_locator(loc)}")
+            if n == iteration: # or found_locator is None:
+                print(f"          Setting Locator to '{locator_type}' {evaluate_locator(loc)}")
+                found_locator = loc
+        if found_locator is not None:
+            break
+
+    print(f"      END get_locator_object '{locator_type}' '{locator_name}' #{iteration}")
+    return found_locator
