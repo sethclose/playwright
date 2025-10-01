@@ -1,0 +1,28 @@
+button	        A clickable button (e.g., <input type="button" value="Click Me">).
+checkbox	    A checkbox for a user to select one or more options.
+color	        A control for specifying a color.
+date	        A control for entering a date.
+datetime-local  A control for entering a date and time.
+email	        An input field for an email address.
+file	        A control for uploading one or more files.
+hidden	        A control not displayed to the user but submitted with the form.
+image	        A clickable image.
+month	        A control for entering a month and year.
+number	        A control for entering a number.
+password	    An input field for a password, which masks the entered text.
+radio	        A radio button, allowing a user to select only one option from a set.
+range	        A control for entering a number whose exact value is not important.
+reset	        A button that resets the form.
+search	        A single-line text input field for search strings.
+submit	        A button that submits the form.
+tel	            An input field for a telephone number.
+text	        The default single-line text input field.
+time	        A control for entering a time.
+url	            An input field for a web address.
+week	        A control for entering a week and year.
+
+AlcoholOrIllegalSubstancesConsumptionInput.Value
+ArrestedForAlcoholOrIllegalSubstancesInput.Value
+
+#rg__1_opt_0
+

@@ -1,8 +1,9 @@
-from playwright.sync_api import Page, Locator
+from playwright.sync_api import Page, Locator, expect
 from datetime import datetime as dt
 import pandas as pd
 import time
 import log
+import tools
 
 def wait_for_page(l: log.Log, page: Page):
     l.s("Wait")
@@ -65,30 +66,78 @@ def get(l: log.Log, page: Page, locator_type: str, locator_name: str, iteration:
     :param iteration: number of element if multiples
     :return: playwright locator object that was found
     """
-
     l.s(f"Get Element:  {locator_type}:{locator_name} ({iteration})")
     found_by = ""
+
+    # Radio Buttons
     if locator_type == 'radio':
         l.w(f"Getting Radio button choice(s)")
         locators = page.locator(f'input[type="{locator_type}"]').all()
         for loc in locators:
+            l.w(f"Locator:  {evaluate_locator(loc)}")
             if locator_name.lower() in loc.get_attribute('fieldref').lower():
                 l.w(f"  Locator:  {evaluate_locator(loc)} contains '{locator_name}'")
         locators = [loc for loc in locators if locator_name.lower() in loc.get_attribute('fieldref').lower()]
+
+    # Wildcard Link - Evaluation of disappearing links causes errors in other section
+    elif locator_type in ['link', 'a', 'button'] and locator_name == 'ANY':
+        l.w("Getting all links by role")
+        locators = page.get_by_role('link').all()
+        l.w(f"Found {len(locators)} locators.  Looking for iteration #{iteration}.")
+        for index, loc in enumerate(locators):
+            if loc.is_visible():
+                #loc.hover()
+                #title = loc.get_attribute("title")
+                #l.w(f"hovering over {title} (#{index + 1})")
+                #time.sleep(1)
+                if index + 1 == iteration:
+                    l.w(f"  Selected Locator '{locator_type}' '{locator_name}' #{iteration}.")
+                    l.e()
+                    found_by = "Wildcard Link Search"
+                    return loc
+
+    # Regular Search
     else:
+        l.w(f"Getting non-Radio {locator_type} by text")
         locators = page.get_by_text(locator_name).all()
         found_by = "Text"
         l.w(f"'{locator_type}'(s) by {found_by}: {len(locators)}")
+        if len(locators) == 1:
+            l.w(f"  Found 1 Locator: {locators[0]=}")
+
+        # Special Case for Buttons with Containers (like icons) because FU.DCT
+        if len(locators) == 0 and locator_type == 'button':
+            l.w(f"\n  Could not find the button.  Check for container.")
+
+            if locator_type == 'button': # and locator_name not in ['Sign In']: # in ['Search', 'Edit']:
+                l.w(f"\n  3 Check if {locator_name} button is in container.")
+                loc = page.locator(f"dc-action[data-dc-name={locator_name}]")
+                if loc is not None:
+                    l.w(f"    Got dc-action: {loc}")
+                    url = tools.get_url_from_string(str(loc))
+                    l.w(f"         URL: {url}")
+                    if url.find('onmicrosoft.com') != -1: # This is for sign-on and is okay.
+                        # Do not look for an action ref here as it will take a literal minute.
+                        l.w(f"Using found onmicrosoft button for actions like sign-in.")
+                    else:
+                        l.w(f"    Getting Action Reference button because there is were no locators found.")
+                        locators = [page.locator(f"button[actionref='{locator_name}']")]
+                        l.w(f"      Got: {len(locators)} {loc=}")
+                        if url.find('aspx') != -1:  # This is FU.DCT
+                            l.w(f"      Ignoring .aspx button")
+                            locators = []
+                        else:
+                            l.w(f"      Found contained button")
+                            found_by = "Action Ref"
 
     l.w(f"Found {len(locators)} locators for {locator_name} by {found_by}.")
     for loc in locators:
         l.w(f"  Locator:  {evaluate_locator(loc)}")
-
     for index, loc in enumerate(locators):
-        l.w(f"    Found locator #{index}: {evaluate_locator(loc)}")
-        l.w(f"    Looking for iteration: {iteration} (type={type(iteration)}) = {index + 1} (type={type(index)})?")
+        l.w(f"    Locator #{index}: {evaluate_locator(loc)}")
+        l.w(f"    Looking for iteration: {iteration} (type={type(iteration)}) = {index+1} (type={type(index)})?")
         if index + 1 == iteration:
-            l.w(f"      Selected Locator '{locator_type}' '{locator_name}' #{iteration}.")
+            l.w(f"    => Selected Locator '{locator_type}' '{locator_name}' #{iteration}.")
             l.e()
             return loc
     l.e()
@@ -112,21 +161,23 @@ def act(l:log.Log, page: Page, action: pd.Series) -> pd.Series:
     if action['override'] == 'skip':
         l.w(f"Override:  Skip")
     else:
+        l.w(f"Execute (No Override)")
 
-        # Execute Action
+        # Get Iteration and Sleep Quantities
+        iteration, exception = tools.get_num_value(action['iteration'], int, 1)
+        l.w(f"Iteration:  {iteration}  {exception}")
+        sleep_time, exception = tools.get_num_value(action['sleep'], int, 0)
+        l.w(f"Sleep:  {sleep_time}  {exception}")
 
-        #action['result'] = ""
-        iteration = 1 if type(action['iteration']) not in [str, int] else action['iteration']
-        sleep_time = 0 if type(action['sleep']) not in [str, int] else action['sleep']
-
+        # Retrieve Locator, when/if available
         not_ready = True
         not_found = True
         time_start = dt.now()   # Start timing
         max_wait = 10           # Max seconds to try
         while not_ready and not_found:
-            l.on = False # Don't log these attempts.
+            l.mode = "off"  # do not log these repeated attempts
             loc = get(l=l, page=page, locator_type=str(action['type']), locator_name=str(action['field']), iteration=int(iteration))
-            l.on = True
+            l.mode = "on"   # okay, start logging again
             seconds = (dt.now()-time_start).seconds + (dt.now()-time_start).microseconds / 1_000_0000
             if loc is not None:
                 not_ready = False
@@ -137,13 +188,32 @@ def act(l:log.Log, page: Page, action: pd.Series) -> pd.Series:
         loc = get(l=l, page=page, locator_type=str(action['type']), locator_name=str(action['field']), iteration=int(iteration))
         if loc is None:
             l.w(f"Locator Not Found")
+            if action['field'] == 'edit' and False:
+                l.w(f"Have Edit locator {loc} from normal process")
+                # edit_button = page.locator(f"dc-action[data-dc-name='{action['field'].lower()}'] button[actionref='{action['field']}']")
+                # edit_button = page.locator('dc-action[data-dc-name="delete"] button[actionref="Delete"]')
+                # if edit_button is not None:
+                #    l.w(f"clicking edit_button")
+                #    edit_button.click()
+                l.w(f"Trying something {'else'}")
+                container = page.locator('dc-action[data-dc-name="edit"]')
+                l.w(f"Got container {container}")
+                expect(container).to_be_attached()
+                l.w(f"Container {container.is_visible()=} {container.is_enabled()=}")
+                edit_button = container.get_by_role("button")#, name="edit")#, exact=True)
+                l.w(f"Edit Button in Container {edit_button.is_visible()=} {edit_button.is_enabled()=}")
+                edit_button.scroll_into_view_if_needed()
+                l.w(f"Edit scrolled into view")
+                # expect(edit_button).to_be_visible(timeout=7000)
+                # expect(edit_button).to_be_enabled()
+                edit_button.click()
+
         else:
             l.w(f"Override:  {override()}")
             if override():
                 l.w("Overriding action")
                 if action['override'] == 'hover':
                     l.w(f"Overriding with {action['override']}")
-                    print(f"trying to hover on {action['field']}, what's the page title? {page.title()}")
                     loc.hover()
                 elif action['override'] == 'check':
                     l.w(f"Overriding with {action['override']}")
@@ -151,10 +221,11 @@ def act(l:log.Log, page: Page, action: pd.Series) -> pd.Series:
             else:
                 l.w("Executing action")
 
-                if action['type'] == 'button' or action['type'] == 'a':
-                    if action['field'] == "Edit":
-                        l.w(f"  Here we are at 'Edit'")
-                        l.w(f"  Page: {page.title()}")
+                if action['type'] == 'button':
+
+                    #if action['field'] == "Edit":
+                        #l.w(f"  Here we are at 'Edit'")
+                        #l.w(f"  Page: {page.title()}")
                         #l.w(f"  Press: 'Enter'")
                         #page.keyboard.press("Enter")
                         #l.w(f"  Try: Check()")
@@ -167,13 +238,18 @@ def act(l:log.Log, page: Page, action: pd.Series) -> pd.Series:
                         #    l.w(f"Wait for '{state}'")
                         #    loc.wait_for(state=state)
                         #    l.w(f"  wait is over.")
-                        page.mouse.wheel(delta_x=-200, delta_y=0)
-                        #page.pause()
-                    else:
-                        l.w(f"Click Button: '{evaluate_locator(loc)}'")
-                        loc.click()
+                        #l.w(f"Scroll into view")
+                        #page.mouse.wheel(delta_x=-200, delta_y=0)
+                        #l.w(f"Try Expect")
+                        #expect(loc).to_be_visible()
 
-                elif action['type'] == 'a':
+                        #page.pause()
+                    #else:
+
+                    l.w(f"Click Button: '{evaluate_locator(loc)}'")
+                    loc.click()
+
+                elif action['type'] == 'a' or action['type'] == 'link':
                     l.w(f"Click Link: '{evaluate_locator(loc)}'")
                     loc.click()
 
@@ -211,9 +287,9 @@ def act(l:log.Log, page: Page, action: pd.Series) -> pd.Series:
                                 loc.clear()
 
                             # DCT textboxes as dropdowns are finicky
-                            l.on = False
+                            l.mode = "off"
                             loc_select = get(l=l, page=page, locator_type='select', locator_name=test_value)
-                            l.on = True
+                            l.mode = "on"
                             if loc_select is not None:
                                 l.w(f"Press keys: '{test_value}'")
                                 loc.press_sequentially(test_value)  # types in one key at a time
@@ -233,7 +309,7 @@ def act(l:log.Log, page: Page, action: pd.Series) -> pd.Series:
                     else:
                         l.w(f"'{current_value}' already set to '{test_value}'")
                     action['result'] = current_value
-            l.w(f"Sleeping for {sleep_time} seconds...")
+            l.w(f"Sleeping for {sleep_time} seconds...") if sleep_time > 0 else None
             time.sleep(sleep_time)
         action['time'] = l.section_seconds()
         if action['result'] != '':
@@ -249,13 +325,22 @@ def evaluate_locator(loc: Locator) -> str:
     :param loc: playwright locator object of element
     :return: string of locator data to be logged
     """
-    loc_id = "id=" + loc.get_attribute('id') + " " if loc.get_attribute('id') is not None else ""
-    loc_field = "field=" + loc.get_attribute('fieldref')+ " "  if loc.get_attribute('fieldref') is not None else ""
-    loc_text = "text=" + loc.all_inner_texts()[0]+ " "  if loc.all_inner_texts()[0] is not None else ""
+    try:
+        loc_id = "id=" + loc.get_attribute('id') + " " if loc.get_attribute('id') is not None else ""
+    except Exception as e:
+        return "INVALID"
+    try:
+        loc_field = "field=" + loc.get_attribute('fieldref')+ " "  if loc.get_attribute('fieldref') is not None else ""
+    except IndexError as e:
+        loc_field = ""
+    try:
+        loc_text = "text=" + loc.all_inner_texts()[0]+ " "  if loc.all_inner_texts()[0] is not None else ""
+    except IndexError as e:
+        loc_text = ""
     loc_nth = "nth=" + get_locator_nth_value(loc)+ " "  if get_locator_nth_value(loc) is not None else ""
-    loc_total = loc_id + loc_field + loc_text + loc_nth
-    loc_total = loc_total.replace('\r', '').replace('\n', '').strip()
-    return loc_total
+    loc_desc = loc_id + loc_field + loc_text + loc_nth
+    loc_desc = loc_desc.replace('\r', '').replace('\n', '').strip()
+    return loc_desc
 
 def get_locator_nth_value(loc: Locator) -> str:
     """
@@ -269,7 +354,7 @@ def get_locator_nth_value(loc: Locator) -> str:
     return nth_value
 
 
-
+# These are sometimes used tools
 
 def get_locators_all(page: Page, locator_types: list, search_types: list, locator_name: str) -> list:
     locators = []

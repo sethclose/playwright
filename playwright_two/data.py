@@ -2,7 +2,6 @@ import pandas as pd
 import os
 import tools
 import log
-import xlsxwriter # You don't need it imported, but formatting won't work if it's not installed.
 
 # Create a new folder (output for new tests)
 def make_folder(folder_name:str):
@@ -22,15 +21,20 @@ def get_test_data(dir_path: str = test_dir) -> dict:
     #print(f"dir_path: {dir_path}")
     xls_files = os.listdir(dir_path)
     xls_dfs_dict = {}
-    for file in xls_files:
+    for n, file in enumerate(xls_files):
         if file.find(".xls") >= 0 and file.find("~$") == -1:
             file_path = f"{dir_path}/{file}"
-            #print(f"{file_path=}")
+            #print(f"Test File #{n}:  {file_path}")
             df_dict = pd.read_excel(file_path, sheet_name=None)
-            for key, df in df_dict.items():
-                #print(f"\nkey: {key}\n df: {type(df)}")
-                df.dropna(subset=['type', 'iteration', 'field'], inplace=True)
-                # print(df)
+            for step, df in df_dict.items():
+                #print(f"  step: {step}")
+                #for index, row in df.iterrows():
+                #    print(f"    {index}:  type:{row['type']} field:{row['field']} value:{row['value']}")
+                #row_count = len(df)
+                df.dropna(subset=['type', 'field'], inplace=True)
+                #dropped_row_count = row_count - len(df)
+                #if dropped_row_count > 0:
+                #    print(f"    Dropped {dropped_row_count-len(df)} rows(s) missing type or field values.")
             xls_dfs_dict[file] = df_dict
     return xls_dfs_dict
 

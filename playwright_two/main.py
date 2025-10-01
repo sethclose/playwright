@@ -1,23 +1,24 @@
-import time
-
+# Be sure to first install playwright, xlsxwriter, openpyxl
 from playwright.sync_api import sync_playwright
 import pandas as pd
 from datetime import datetime as dt
+import time
 import steps
 import log
 import data
 import tools
 
-# Config
+# Config -THIS SHOULD ALL BE MOVED TO A SHEET NAMED CONFIG IN THE TEST FILE
 config_df = pd.read_csv("data/config.csv", index_col=0)
 config_df.head()
 headless = True if config_df.loc["headless"].value == "TRUE" else False
 trace_mode = True if config_df.loc["trace_mode"].value == "TRUE" else False
 trace_file = config_df.loc["trace_file"].value
 screenshots = True if config_df.loc["screenshots"].value == "TRUE" else False
+url = "https://uwd125.duckcreekondemand.com/Policy/express.aspx"
 
-input_path = 'data/testing/active'
-output_path = 'data/testing/output'
+input_path = 'data/testing/Tests'
+output_path = 'data/testing/Output'
 data.make_folder(output_path)
 
 # Retrieve Test Data and Run Tests
@@ -50,7 +51,7 @@ for test, test_dict in tests.items():
             log_file.w("Launching browser")
             browser = play.chromium.launch(headless=headless)
             page, context = steps.start(l=log_file, browser=browser)
-            steps.go(log_file, page, 0)
+            steps.go(log_file, page, 0, url)
 
             # Execute Tests for Step
             for step_name, step_df in test_dict.items():

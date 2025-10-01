@@ -6,9 +6,9 @@ import log
 import actions
 import tools
 
-DEV21_URL = os.environ.get('DEV21_URL')
-AGENT_USER = os.environ.get('AGENT_USER')
-AGENT_PASS = os.environ.get('AGENT_PASS')
+#DEV21_URL = #os.environ.get('DEV21_URL')
+#AGENT_USER = os.environ.get('AGENT_USER')
+#AGENT_PASS = os.environ.get('AGENT_PASS')
 
 def start(l: log.Log, browser):
     """
@@ -27,9 +27,9 @@ def start(l: log.Log, browser):
     l.e()
     return page, context
 
-def go(l: log.Log, page: Page, sleep: int=0):
+def go(l: log.Log, page: Page, sleep: int=0, url: str="google.com"):
     l.s("Go to page")
-    page.goto(DEV21_URL)
+    page.goto(url)
     time.sleep(sleep)
     l.e()
 
