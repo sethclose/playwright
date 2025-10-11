@@ -1,7 +1,35 @@
 from playwright.sync_api import Page
 from datetime import datetime
-import os
 import log
+
+
+def str_to_list(value: str) -> list:
+    """
+    convert string to boolean
+    :param value: input comma-delimited string
+    :return: output list
+    """
+    return [v.strip() for v in value.split(',')]
+
+def str_to_int_list(value: str) -> list:
+    """
+    convert string to boolean
+    :param value: input comma-delimited string of numbers
+    :return: output list of numbers
+    """
+    return [int(v.strip()) for v in value.split(',')]
+
+
+def str_to_bool(value: str) -> bool:
+    """
+    convert string to boolean
+    :param value: string input
+    :return: boolean output
+    """
+    if value in ("True", "TRUE", "true", 1.0, 1, True):
+        return True
+    else:
+        return False
 
 
 def get_url_from_string(text: str) -> str:

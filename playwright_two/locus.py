@@ -1,197 +1,319 @@
+#from time import perf_counter
+#from openpyxl.pivot.table import Location
 from playwright.sync_api import Page, Locator
+#from datetime import datetime as dt
+import pandas as pd
 import time
-from datetime import datetime as dt
-import log.logging as log
+import log
+import tools
+from tools import str_to_bool
 
-def get_loc(l: log.Log, page: Page, locator_type: str, locator_name: str, iteration: int=1):
-    """
-    Finds the locator of the element specified
-    :param l: passed log file object
-    :param page: playwright page object
-    :param locator_type: type of element being done
-    :param locator_name: name of element being done
-    :param iteration: number of element if multiples
-    :return: playwright locator object that was found
-    """
-    l.s("FIND")
-    locators = page.get_by_text(locator_name).all()
-    l.w(f"Found {len(locators)} locators for {locator_name} by Text.")
-    for index, loc in enumerate(locators):
-        #l.w(f"  Found locator #{index}: {evaluate_locator(loc)}")
-        #l.w(f"  Looking for iteration: {iteration} (type={type(iteration)}) = {index + 1} (type={type(index)})?")
-        if index + 1 == iteration:
-            l.w(f"  Selected Locator '{locator_type}' '{locator_name}' #{iteration}.")
-            l.e()
-            return loc
+def wait_for_page(l: log.Log, page: Page):
+    l.s("Wait")
+
+    def spinner():
+        # Make Sure Spinner is Gone
+        before = time.perf_counter()
+        page.locator("#loading-spinner").wait_for(state="hidden")
+        time_waited = time.perf_counter() - before
+        if time_waited > 0.1:
+            l.w(f"Waited {time_waited:.1f} seconds spinner to stop.")
+
+    def elements():
+        # Make Sure all Elements are Loaded
+        loaded = False
+        wait_seconds = (1/9)
+        locators = []
+        num = 0
+        before = time.perf_counter()
+        while not loaded:
+            #l.w(f"Waiting for all elements to load.  Current total is {num}.")
+            locators += page.get_by_role('textbox').all()
+            locators += page.get_by_role('button').all()
+            locators += page.get_by_role('radio').all()
+            locators = list(set(locators))
+            if len(locators) >= num != 0:
+                loaded = True
+            num = len(locators)
+            time.sleep(wait_seconds)
+        time_waited = time.perf_counter() - before
+        if time_waited > 0.1:
+            l.w(f"Waited {time_waited:.1f} for {num} element(s) to load.")
+
+    def load():
+        # Make sure Page is Not Loading
+        before = time.perf_counter()
+        load_count = 0
+        while page.title().find("Loading") != -1:
+            load_count += 1
+            if load_count == 0:
+                l.w(f"Waiting for while page is '{page.title()}'.")
+        time_waited = time.perf_counter() - before
+        if time_waited > 0.1:
+            l.w(f"Waited {time_waited:.1f} seconds for page to load.")
+
+    def idle():
+        # Wait for Network Idle
+        before = time.perf_counter()
+        page.wait_for_load_state("networkidle")
+        time_waited = time.perf_counter() - before
+        if time_waited > 0.1:
+            l.w(f"Waited {time_waited:.1f} seconds for network idle.")
+
+    spinner()
+    load()
+    elements()
+    idle()
+
     l.e()
-    return None
 
-def do_loc(l: log.Log, page: Page, locator_type: str, locator_name: str, iteration: int=1,
-           value: str="", sleep: float=0):
-    """
-    Executes the action on the locator element specified by `locator_name`.
-    :param l: passed log file object
-    :param page: playwright page object
-    :param locator_type: type of element being done
-    :param locator_name: name of element being done
-    :param iteration: number of element if multiples
-    :param value: value of element to be entered
-    :param sleep: seconds to wait after doing
-    :return: locator: playwright locator object
-    """
-    l.s("DO")
-    not_ready = True
-    not_found = True
-    wait_start = dt.now()
-    max_wait = 10
-    while not_ready and not_found:
-        l.on = False # Don't log these attempts.
-        loc = get_loc(l=l, page=page, locator_type=locator_type, locator_name=locator_name, iteration=iteration)
-        l.on = True
-        seconds = (dt.now() - wait_start).seconds + (dt.now() - wait_start).microseconds / 1000000
-        if loc is not None:
-            not_ready = False
-            l.w(f"Found element in {seconds:.3f} seconds.")
-        elif seconds > max_wait:
-            not_found = False
-            l.w(f"Timed Out looking for element in {seconds:.1f} seconds.")
-    loc = get_loc(l=l, page=page, locator_type=locator_type, locator_name=locator_name, iteration=iteration)
-    if loc is None:
-        l.w(f"Locator Not Found")
+def act(l:log.Log, fields: pd.DataFrame, page: Page, action: pd.Series) -> pd.Series:
+    l.s(f"Execute")
+
+    # Start timer for action['time'] result
+    start_time = time.perf_counter()
+
+    # Skip if specified (override column)
+    if action['override'] == 'skip':
+        l.w(f"Skipping Action")
+
+    # Execute Action (not skipped)
     else:
-        if locator_type == 'button':
-            l.w(f"Click: '{evaluate_locator(loc)}'")
-            loc.click()
-        elif locator_type == 'radio':
-            l.w(f"Check: '{evaluate_locator(loc)}'")
-            loc.check()
-        elif locator_type == 'checkbox':
-            l.w(f"Check: '{evaluate_locator(loc)}'")
-            loc.check()
-        elif locator_type == 'textbox':
 
-            # Only enter if value is to change.  May need several attempts.
-            current_value = loc.input_value()
-            test_value = str(value)
-            if current_value != test_value:
-                attempts = 0
-                while current_value != test_value:
-                    attempts += 1
-                    l.w(f"{locator_name}:  '{current_value}' != '{test_value}'")
-                    if current_value != '':
-                        l.w(f"Clear: '{current_value}'")
-                        loc.clear()
+        # The Action
+        print_row = "*"
+        for key, value in action.items():
+            if value != "":
+                print_row += f" {key}:{value} *"
+        l.w(f"{print_row}")
 
-                    # DCT textboxes as dropdowns are finicky
-                    l.on = False
-                    loc_select = get_loc(l=l, page=page, locator_type='select', locator_name=test_value)
-                    l.on = True
-                    if loc_select is not None:
-                        l.w(f"Press: '{test_value}'")
-                        loc.press_sequentially(test_value)  # types in one key at a time
-                        time.sleep(1/2)
-                    else:
-                        l.w(f"Type: '{test_value}'")
-                        loc.type(test_value) # 'type' as in type on a keyboard
+        # Wait
+        wait_for_page(l, page) if str_to_bool(action['wait']) else None
 
-                    # Tab out
-                    l.w(f"Press:  Tab")
-                    page.keyboard.press("Tab")
+        # Retrieve Enabled Element
+        element = None
+        element_enabled = False
+        method = None
+        element_condition = None
 
-                    # If there was trouble entering this value, sleep a second...
-                    current_value = loc.input_value()
-                    l.w(f"Current value: '{current_value}'")
-                    if attempts > 1:
-                        l.w(f"Repeated attempt (#{attempts-1}):  Pausing...")
-                        time.sleep(1/2)
-
-                l.w(f"Succeeded entry in only {attempts} attempt(s).")
+        # Because playwright locator.is_enabled() crashes
+        def enabled(loc: Locator) -> bool:
+            max_time = 1  # seconds
+            try:
+                loc.is_enabled(timeout=max_time*1000)
+            except Exception as e:
+                return False
             else:
-                l.w(f"'{current_value}' already set to '{test_value}'")
-        time.sleep(sleep)
+                return True
+
+        # FIND ELEMENT
+
+        # First try Test Attribute and Value - these are explicit user overrides
+        if action["attribute"] != "":
+            l.w(f"Trying Test Attribute and Value")
+            if action["attribute"] == "id":
+                element_condition = f"#{action["name"]}"
+            else:
+                element_condition = f"[{action["attribute"]}='{action["name"]}']"
+            element = page.locator(element_condition).nth((action["iteration"]-1))
+            l.w(f"{element_condition=}")
+            element_enabled = enabled(element)
+            l.w(f"  {element.get_attribute(action["attribute"])=} {element.get_attribute("id")=} {element.get_attribute("dc-data-name")=}")
+            l.w(f"  {element.get_attribute(action["name"])=} {element.get_attribute("title")=} {element.get_attribute("actionref")=}")
+            l.w(f"Element {element_condition} enabled?  {element_enabled}")
+            if element_enabled:
+                method = element_condition + f".nth={action['iteration']-1}"
+        else:
+            l.w(f"No Test Attribute Specified")
+
+        # Try Field Reference Element Conditions - main method when not overridden
+        if not element_enabled:
+            l.w(f"Field Reference Element Conditions")
+
+            # Find Unique Field Reference
+            fields_subset = fields[(fields['screen'] == action['screen']) & (fields['prompt'] == action['name'])]
+            field = None
+            if len(fields_subset) >= 1:
+                l.w(f"Found Unique Field Reference(s)")
+                field = fields_subset.iloc[0]
+            elif len(fields_subset) == 0:
+                l.w(f"  No Matching Field References")
+            else: # There should be only one row, so we just take the first above [0]
+                  # action["iteration"] is only to determine which element to take among those the field ref returned
+                l.w(f"  Multiple Matching Field References")
+                row_count = 0
+                for i, f in fields_subset.iterrows():
+                    row_count += 1
+                    print_row = ""
+                    for key, value in f.items():
+                        print_row += f" {key}:{value} *"
+                    l.w(f"  Field Reference:  [{i}] {print_row}")
+                    attribute_1_display = f"{f['attribute_1']}={f['value_1']}"
+                    attribute_2_display = f"{f['attribute_2']}={f['value_2']}" if f['attribute_2'] != "" else ""
+                    l.w(f"  Field:  {attribute_1_display}  {attribute_2_display}")
+                    if row_count == action["iteration"]:
+                        l.w(f"    Field:  {attribute_1_display}  {attribute_2_display}")
+                        field = f
+                        break
+
+            if field is not None:
+                l.w(f"Trying field reference element conditions")
+                element_conditions = []
+                if field["attribute_1"] == "id" and field["value_1"] != "":
+                    element_conditions.append(f"[#{field["value_1"]}]")
+                if field["attribute_1"] != "id":
+                    element_conditions.append(f"[{field["attribute_1"]}='{field["value_1"]}']")
+                if field["attribute_2"] != "":
+                    element_conditions.append(f"[{field["attribute_2"]}='{field["value_2"]}']")
+                for element_condition in element_conditions:
+                    element = page.locator(element_condition).nth(action["iteration"]-1)
+                    element_enabled = enabled(element)
+                    l.w(f"Element {element_condition} enabled?  {element_enabled}")
+                    if element_enabled:
+                        method = element_condition + f".nth={action['iteration']-1}"
+                        break
+            else:
+                l.w(f"Did not find a unique Field Reference")
+
+        # Try by various methods to use Name - flat out dangerous
+        if not element_enabled and 1==0:
+            l.w(f"Name Element Conditions")
+            element_conditions = [  f"text={action["name"]}",
+                                    f"[name='{action["name"]}']",
+                                    f"[title='{action["name"]}']",
+                                    f"[label='{action["name"]}']",   ]
+            for element_condition in element_conditions:
+                element = page.locator(element_condition)
+                element_enabled = enabled(element)
+                l.w(f"Element {element_condition} enabled?  {element_enabled}")
+                if element_enabled:
+                    method = element_condition
+                    break
+
+        # Try Test Name and Value by Role - in case no field ref exists:  diff the output xls
+        if not element_enabled:
+            l.w(f"Name and Value by Role Element Conditions")
+            element_condition = f"['{action['type']}', name='{action['name']})'])"
+
+            #elements = page.get_by_role(action['type'], name=action['name']).all()
+            #l.w(f"Element Conditions:  {element_condition}")
+            #l.w(f"Found {len(elements)} Elements")
+            #for i, element in enumerate(elements):
+            #    l.w(f"[{i}]  {element.get_attribute("id")=} {element.get_attribute("title")=} {element.get_attribute("actionref")=}")
+
+            if 1==1:
+                element = page.get_by_role(action['type'], name=action['name']).nth(action['iteration']-1)
+                element_enabled = enabled(element)
+                l.w(f"Element {element_condition} enabled?  {element_enabled}")
+                if element_enabled:
+                    method = element_condition + f".nth={action['iteration']-1}"
+
+        # PROCESS ELEMENT
+
+        # Was Element Found?
+        if not element_enabled:
+            l.w(f"Did Not Find Element")
+        else:
+            l.w(f"Element found by {method}")
+            action['element'] = method
+
+            # Process Element
+
+            # BUTTON
+            if action['type'] == 'button':
+                l.w("Clicking Button")
+                element.click()
+
+            # LINK
+            if action['type'] == 'link':
+                l.w("Clicking Link")
+                element.click()
+
+            # TEXTBOX
+            if action['type'] == "textbox":
+                l.w(f"Textbox initial value: {element.input_value()}")
+                action["previous"] = element.input_value()
+                if not action["check"]: # Not just checking on the value
+                    entered = False
+                    while not entered and element.input_value() != action['value']:
+                        if element.input_value() != "" and action['value'] != "":
+                            l.w(f"Clearing Value:  '{element.input_value()}'")
+                            element.clear()
+                        element.press_sequentially(action['value'])
+                        l.w(f"Value is set to: {element.input_value()}")
+                        if element.input_value() == action['value']:
+                            entered = True
+                        page.keyboard.press("Tab")
+                    if not entered:
+                        l.w(f"Element {action['name']} already set to correct value.")
+                action["result"] = element.input_value()
+
+            # RADIO
+            if action['type'] == 'radio':
+                l.w("Radio Button")
+                action["previous"] = element.is_checked()
+                if not action["check"]:
+                    # Updating Value, not just checking value
+                    while not element.is_checked():
+                        l.w("Checking Radio Button")
+                        element_enabled = enabled(element)
+                        if not element_enabled:
+                            l.w("  Element is now disabled.")
+                            if method is not None:
+                                l.w(f"  Method is not None:  {method}, Re-Locating by {element_condition}")
+                                if method.find("get_by_role") == -1:
+                                    element = page.locator(element_condition)
+                                else:
+                                    element = page.get_by_role(action['type'], name=action['name']).nth(action['iteration']-1)
+                                element_enabled = enabled(element)
+                                l.w(f"Element {element_condition} enabled?  {element_enabled}")
+                            else:
+                                l.w(f"No locator method found.")
+                        if element_enabled:
+                            l.w(f"Element enabled:  CLICKING")
+                            element.click()
+                            page.keyboard.press("Tab")
+                        else:
+                            l.w(f"Something went terribly wrong.")
+                action["result"] = element.is_checked()
+
+            # CHECKBOX
+            if action['type'] == 'checkbox':
+                action["previous"] = element.is_checked()
+                if action['check']:
+                    # Just checking the value
+                    action['result'] = element.is_checked()
+                else:
+                    # Checking the box
+                    check_box = tools.str_to_bool(action['value'])
+                    if check_box:
+                        # Make sure box is checked
+                        if element.is_checked():
+                            l.w("Box already checked")
+                        else:
+                            l.w("Checking box")
+                            while not element.is_checked():
+                                element.check()
+                    else:
+                        # Uncheck Box
+                        if not element.is_checked():
+                            l.w("Box already unchecked")
+                        else:
+                            l.w("Unchecking box")
+                            while element.is_checked():
+                                element.uncheck()
+                    page.keyboard.press("Tab")
+                    l.w(f"Box checked? {element.is_checked()}")
+                    action["result"] = element.is_checked()
+
+
+        # Update result Time
+        action['time'] = round(time.perf_counter() - start_time, 3)
+
+        # Sleep
+        if action['sleep'] > 0:
+            l.w(f"Sleeping {action['sleep']} second(s)")
+            time.sleep(action['sleep'])
+
     l.e()
-    return loc
-
-def evaluate_locator(loc: Locator) -> str:
-    """
-    Logging tool for gathering information about locator element
-    :param loc: playwright locator object of element
-    :return: string of locator data to be logged
-    """
-    loc_id = "id=" + loc.get_attribute('id') + " " if loc.get_attribute('id') is not None else ""
-    loc_field = "field=" + loc.get_attribute('fieldref')+ " "  if loc.get_attribute('fieldref') is not None else ""
-    loc_text = "text=" + loc.all_inner_texts()[0]+ " "  if loc.all_inner_texts()[0] is not None else ""
-    loc_nth = "nth=" + get_locator_nth_value(loc)+ " "  if get_locator_nth_value(loc) is not None else ""
-    loc_total = loc_id + loc_field + loc_text + loc_nth
-    loc_total = loc_total.replace('\r', '').replace('\n', '').strip()
-    return loc_total
-
-def get_locator_nth_value(loc: Locator) -> str:
-    """
-    Retrieves the nth value of a locator element (debugging tool)
-    :param loc: playwright locator object
-    :return: value of attribute "nth"
-    """
-    nth_index = str(loc).find("nth=")
-    nth_value = str(loc)[nth_index + 4:nth_index + 6]
-    nth_value = nth_value.replace("'", "")
-    return nth_value
-
-def get_locators_all(page: Page, locator_types: list, search_types: list, locator_name: str) -> list:
-    """
-    Finds any and all locators on the page (debugging tool)
-    :param page: playwright page object
-    :param locator_types: types of locators being sought
-    :param search_types: types of search to perform
-    :param locator_name: descriptor of sought locator
-    :return:
-    """
-    locators = []
-    for locator_type in locator_types:
-        print(f'      LOOKING for {locator_type}')
-        for search_type in search_types:
-            print(f'      SEARCHING by {search_type}')
-            if 'loc' == search_type:
-                pre_count = len(locators)
-                temp_locators = page.locator(locator_type).all()
-                locators += temp_locators
-                locators = list(set(locators))
-                add_count = len(locators) - pre_count
-                print(f'        Added {add_count} locators for {locator_type} via loc method')
-            if 'role' == search_type:
-                pre_count = len(locators)
-                temp_locators = page.get_by_role(locator_type).all()
-                locators += temp_locators
-                locators = list(set(locators))
-                add_count = len(locators) - pre_count
-                print(f'        Added {add_count} locators for {locator_type} via role method')
-            if 'text' == search_type:
-                pre_count = len(locators)
-                temp_locators = page.get_by_text(locator_name).all()
-                locators += temp_locators
-                locators = list(set(locators))
-                add_count = len(locators) - pre_count
-                print(f'        Added {add_count} locators for {locator_type} via text method')
-            if 'label' == search_type:
-                pre_count = len(locators)
-                temp_locators = page.get_by_label(locator_name).all()
-                print(f"        BY LABEL:  {temp_locators=}")
-                locators += temp_locators
-                locators = list(set(locators))
-                add_count = len(locators) - pre_count
-                print(f'        Added {add_count} locators for {locator_type} via label method')
-            if 'input' == search_type:
-                pre_count = len(locators)
-                locator_list = page.locator(f'input[type="{locator_type}"]')
-                temp_locators = [locator_list.nth(i) for i in range(locator_list.count())]
-                locators += temp_locators
-                locators = list(set(locators))
-                add_count = len(locators) - pre_count
-                print(f'        Added {add_count} locators for {locator_type} via input method')
-    locators = list(set(locators))
-    print(f'        Total {len(locators)} locators for {locator_types}')
-    locators = sorted(locators, key=lambda loc_key: (loc_key.get_attribute('id') is None, loc_key.get_attribute('id'),
-                                                     loc_key.get_attribute('fieldref') is None, loc_key.get_attribute('fieldref'),
-                                                     #loc_key.all_inner_texts()[0] is None, loc_key.all_inner_texts()[0],
-                                                     get_locator_nth_value(loc_key) is None, get_locator_nth_value(loc_key)))
-    return locators
+    return action

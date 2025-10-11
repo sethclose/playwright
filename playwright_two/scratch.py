@@ -1,3 +1,12 @@
+browser_entry = ""#"Chrome, Fire"
+print(browser_entry.split(','))
+b_list = [b.strip() for b in browser_entry.split(',')]
+print(b_list)
+
+
+
+
+
 count = 0
 nums = [3, 5, 5, 3, 2, ]
 print(f"{nums=}")

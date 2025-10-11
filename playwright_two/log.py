@@ -10,38 +10,34 @@ class Log:
         self.screenshots = screenshots
         self.sections: list[str] = []
         self.starts: list[dt] = []
-        #self.on = True
         self.mode = "on" # "off", "debug"
 
     def start_file(self, title=""):
         """Creates/overwrites log file"""
         string = f"{title}"
-        if self.mode == "on":
-            #with open(self.file_name, 'w', encoding='utf-8') as file:
+        if self.mode in ("on", "debug"):
             self.file.write(string)
-        elif self.mode == "debug":
+        if self.mode == "debug":
             print(string)
 
     def indent(self):
         string = "    "
-        if self.mode == "on":
-            #with open(self.file_name, 'a+', encoding='utf-8') as file:
-            for n in range(len(self.sections)):
+        for n in range(len(self.sections)):
+            if self.mode in ("on", "debug"):
                 self.file.write(string)
-        elif self.mode == "debug":
-            print(string, end="")
+            if self.mode == "debug":
+                print(string, end="")
 
-    def w(self, text):
+    def w(self, text, last='\n'):
         """ w(rite_log)
             Appends line of text to log file
         """
-        if self.mode == "on":
-            self.indent()
-            #with open(self.file_name, 'a+', encoding='utf-8') as file:
+        self.indent()
+        if self.mode in ("on", "debug"):
             self.file.write(text)
-            self.file.write("\n")
-        elif self.mode == "debug":
-            print(text)
+            self.file.write(last)
+        if self.mode == "debug":
+            print(text, end=last)
 
     def s(self, title: str):
         """
@@ -52,27 +48,28 @@ class Log:
         self.indent()
         self.sections.append(title)
         self.starts.append(dt.now())
-        string = f"START {title}\n"
-        if self.mode == "on":
-            #with open(self.file_name, 'a+', encoding='utf-8') as file:
+        string = f"START {title}"
+        if self.mode in ("on", "debug"):
             self.file.write(string)
-        elif self.mode == "debug":
+            self.file.write("\n")
+        if self.mode == "debug":
             print(string)
 
-    def e(self):
+    def e(self, message: str = ""):
         """ e(nd_section)
             Removes indent and indicates end of new section
             Always follows a call to (s)tart_function
         """
         func = self.sections.pop()
         start = self.starts.pop()
+        #print(f"Calling e for {func=} {start=} {self.mode=}")
         seconds = (dt.now() - start).seconds + (dt.now() - start).microseconds / 1000000
-        string = f"END {func} ({seconds:.3f}s)\n"
-        if self.mode == "on":
-            self.indent()
-            #with open(self.file_name, 'a+', encoding='utf-8') as file:
+        string = f"END {func} ({seconds:.3f}s) {message}"
+        self.indent()
+        if self.mode in ("on", "debug"):
             self.file.write(string)
-        elif self.mode == "debug":
+            self.file.write("\n")
+        if self.mode == "debug":
             print(string)
 
     def section_seconds(self):

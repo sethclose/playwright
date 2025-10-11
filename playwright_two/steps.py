@@ -1,14 +1,9 @@
 from playwright.sync_api import Page
 import pandas as pd
-import os
 import time
 import log
-import actions
+import locus
 import tools
-
-#DEV21_URL = #os.environ.get('DEV21_URL')
-#AGENT_USER = os.environ.get('AGENT_USER')
-#AGENT_PASS = os.environ.get('AGENT_PASS')
 
 def start(l: log.Log, browser):
     """
@@ -33,23 +28,73 @@ def go(l: log.Log, page: Page, sleep: int=0, url: str="google.com"):
     time.sleep(sleep)
     l.e()
 
-def step(l: log.Log, page: Page, step_name: str, step_df: pd.DataFrame) -> pd.DataFrame:
+def step(l: log.Log, fields: pd.DataFrame, page: Page, step_name: str, step_df: pd.DataFrame) -> pd.DataFrame:
     l.s("Step")
-    # Initialize Result Columns
+
+    # Before
+    for i, action in step_df.iterrows():
+        if action['override'] != 'skip':
+            print_row = ""
+            for key, value in action.items():
+                if value != "":
+                    print_row += f" {key}:{value} *"
+            l.w(f"[{i}] {print_row}")
+
+    # Instantiate Result columns in Action Series
     step_df['time'] = ''
+    step_df['previous'] = ''
     step_df['result'] = ''
-    # For each action get result Series back and update step DF
+    step_df['element'] = ''
+
+    # Perform Action with debugging
+    terminal_log_message_length = 0
     for index, action in step_df.iterrows():
-        if action['override'] == 'skip':
-            pass
-        else:
-            print(f"   {action['field']} ({action['type'][0]})", end="  ")
-            returned = actions.act(l, page, action)
-            step_df.loc[index] = returned
-    # Show all action column indices and values
-    for index, action in step_df.iterrows():
-        l.w(f"#{index}: {[(i, a) for i, a in action.items()]}")
+
+            if action['override'] != 'skip':
+
+                # Terminal Logging
+                message = f"   {action['name']} ({action['type'][0]})"
+                terminal_log_message_length += len(message)
+                if terminal_log_message_length > 100:
+                    print(f"\n                                                      {message}", end="  ")
+                    terminal_log_message_length = 0
+                else:
+                    print(message, end="  ")
+
+                # Setup Debugging, if specified
+                prev_mode = l.mode
+                if action['override'] == 'debug':
+                    time.sleep(1)
+                    l.mode = 'debug'
+                    print()
+                    l.s("Debugging")
+
+                # Execute Test Action
+                result_df = locus.act(l, fields, page, action)
+
+                # End Debugging, if specified
+                if action['override'] == 'debug':
+                    l.e()
+                    l.mode = prev_mode
+                    print(f"    Continuing step:{step_name:>30}", end="    ")
+
+            else: # Skipped
+                result_df = action
+
+            step_df.loc[index] = result_df
+
+    # With Result Data
+    for i, action in step_df.iterrows():
+        if action['override'] != 'skip':
+            print_row = ""
+            for key, value in action.items():
+                if value != "":
+                    print_row += f" {key}:{value} *"
+            l.w(f"[{i}] {print_row}")
+
+    # Screenshoot # THIS SHOULD REALLY BE TRIGGERED BY STEP ACTIONS
     tools.take_screenshot(l, page, step_name)
+
     l.e()
     return step_df
 
