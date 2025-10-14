@@ -33,7 +33,7 @@ def step(l: log.Log, fields: pd.DataFrame, page: Page, step_name: str, step_df: 
 
     # Before
     for i, action in step_df.iterrows():
-        if action['override'] != 'skip':
+        if not action['skip']:
             print_row = ""
             for key, value in action.items():
                 if value != "":
@@ -50,7 +50,7 @@ def step(l: log.Log, fields: pd.DataFrame, page: Page, step_name: str, step_df: 
     terminal_log_message_length = 0
     for index, action in step_df.iterrows():
 
-            if action['override'] != 'skip':
+            if not action['skip']:
 
                 # Terminal Logging
                 message = f"   {action['name']} ({action['type'][0]})"
@@ -63,7 +63,7 @@ def step(l: log.Log, fields: pd.DataFrame, page: Page, step_name: str, step_df: 
 
                 # Setup Debugging, if specified
                 prev_mode = l.mode
-                if action['override'] == 'debug':
+                if action['debug']:
                     time.sleep(1)
                     l.mode = 'debug'
                     print()
@@ -73,7 +73,7 @@ def step(l: log.Log, fields: pd.DataFrame, page: Page, step_name: str, step_df: 
                 result_df = locus.act(l, fields, page, action)
 
                 # End Debugging, if specified
-                if action['override'] == 'debug':
+                if action['debug']:
                     l.e()
                     l.mode = prev_mode
                     print(f"    Continuing step:{step_name:>30}", end="    ")
@@ -85,7 +85,7 @@ def step(l: log.Log, fields: pd.DataFrame, page: Page, step_name: str, step_df: 
 
     # With Result Data
     for i, action in step_df.iterrows():
-        if action['override'] != 'skip':
+        if not action['skip']:
             print_row = ""
             for key, value in action.items():
                 if value != "":

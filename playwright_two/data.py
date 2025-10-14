@@ -29,7 +29,7 @@ def get_test_data(dir_path: str, config_name: str) -> dict:
 
                 # Config Sheet
                 if step == config_name:
-                    skip_steps = df[df["name"]=="skip_steps"].iloc[0]["value"]
+                    skip_steps = df[df['name']=='skip_steps'].iloc[0]['value']
                     skip_steps = tools.str_to_int_list(skip_steps)
 
                 else:
@@ -50,14 +50,14 @@ def get_test_data(dir_path: str, config_name: str) -> dict:
                         # Missing values and Column Types
                         df.dropna(subset=['type', 'name'], inplace=True)
                         df['screen'] = df['screen'].fillna("").astype(str)
-                        df['description'] = df['description'].fillna("").astype(str)
                         df['value'] = df['value'].fillna("").astype(str)
                         df['iteration'] = df['iteration'].fillna(1).astype(int)
                         df['attribute'] = df['attribute'].fillna("")
-                        df['check'] = df['check'].fillna("").apply(tools.str_to_bool).astype(bool)
                         df['wait'] = df['wait'].fillna("").apply(tools.str_to_bool).astype(bool)
                         df['sleep'] = df['sleep'].fillna(0)
-                        df['override'] = df['override'].fillna("")
+                        df['eval'] = df['eval'].fillna("").apply(tools.str_to_bool).astype(bool)
+                        df['debug'] = df['debug'].fillna("").apply(tools.str_to_bool).astype(bool)
+                        df['skip'] = df['skip'].fillna("").apply(tools.str_to_bool).astype(bool)
 
                         #print(f"Step: {step} Updated Values:")
                         #for i, action in df.iterrows():
@@ -94,8 +94,6 @@ def write_output_workbook(l: log.Log, df_dict: dict):
     with pd.ExcelWriter(f'{l.output_path}/{file_name}', engine='xlsxwriter') as writer:
         for step_name, df in df_dict.items():
             l.w(f"'{step_name}' output data saving to '{l.output_path}/{file_name}' sheet '{step_name}'")
-            if step_name != "Config":
-                df['override'] = df['override'].str.upper()
             df.to_excel(writer, sheet_name=step_name, index=False)
             # Fit column widths
             worksheet = writer.sheets[step_name]

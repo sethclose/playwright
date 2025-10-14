@@ -1,5 +1,6 @@
 from playwright.sync_api import Page
 from datetime import datetime
+import pandas as pd
 import log
 
 
@@ -17,7 +18,12 @@ def str_to_int_list(value: str) -> list:
     :param value: input comma-delimited string of numbers
     :return: output list of numbers
     """
-    return [int(v.strip()) for v in value.split(',')]
+    if pd.isna(value) or pd.isnull(value):
+        return []
+    elif type(value) == int:
+        return [value]
+    else:
+        return [int(v.strip()) for v in value.split(',')]
 
 
 def str_to_bool(value: str) -> bool:
